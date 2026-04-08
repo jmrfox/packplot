@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,7 +13,7 @@ from scipy.optimize import OptimizeResult, differential_evolution, minimize
 from shapely import affinity
 from shapely.geometry import Polygon
 
-from packplot.types import PackOptions, PackedPlacement, SourceObject
+from packplot.types import OptimizeConfig, PackOptions, PackedPlacement, SourceObject
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,8 @@ class _ProgressTracker:
     best_score: float = float("inf")
     best_overlap: float = float("inf")
     best_aspect_error: float = float("inf")
+    heartbeat_seconds: float = 5.0
+    _last_log_ts: float = 0.0
 
     def update(self, *, score: float, overlap: float, aspect_error: float | None = None) -> None:
         self.count += 1
@@ -53,7 +56,17 @@ class _ProgressTracker:
             if aspect_error is not None:
                 self.best_aspect_error = aspect_error
 
-        if self.interval > 0 and self.count % self.interval == 0:
+        now = time.monotonic()
+        should_log = False
+        if self.count == 1:
+            should_log = True
+        elif self.interval > 0 and self.count % self.interval == 0:
+            should_log = True
+        elif self.heartbeat_seconds > 0 and (now - self._last_log_ts) >= self.heartbeat_seconds:
+            should_log = True
+
+        if should_log:
+            self._last_log_ts = now
             if self.best_aspect_error != float("inf"):
                 logger.info(
                     "%s progress: eval=%d best_score=%.3f best_overlap=%.6f best_aspect_error=%.4f",
@@ -465,6 +478,7 @@ def _spread_layout_with_fixed_canvas(
     placements: list[PackedPlacement],
     canvas_size: tuple[int, int],
     options: PackOptions,
+    optimize_cfg: OptimizeConfig,
 ) -> tuple[list[PackedPlacement], float, float]:
     """Run second-phase optimization on a fixed canvas to improve spacing."""
     width, height = canvas_size
@@ -488,15 +502,18 @@ def _spread_layout_with_fixed_canvas(
 
     init_polys, _ = _polygons_from_vector(x0)
     init_clearance, init_q25, init_mean = _clearance_stats(init_polys, width, height)
+    spread_phase = optimize_cfg.spread
+    spread_objective_cfg = optimize_cfg.spread_objective
     spread_progress = _ProgressTracker(
         phase="spread",
-        interval=max(0, int(options.spread_progress_interval)),
+        interval=max(0, int(spread_phase.progress_log_every_evaluations)),
+        heartbeat_seconds=max(0.0, float(spread_phase.progress_log_heartbeat_seconds)),
     )
 
     def objective(vec: np.ndarray) -> float:
         polygons, _ = _polygons_from_vector(vec)
         clearance_values = _clearance_values(polygons, width, height)
-        soft_min_clearance = _softmin(clearance_values, options.spread_smoothness)
+        soft_min_clearance = _softmin(clearance_values, spread_objective_cfg.softmin_smoothness)
         q25_clearance = float(np.quantile(clearance_values, 0.25))
         mean_log_clearance = float(np.mean(np.log1p(clearance_values)))
         overlap = _total_overlap(_buffered(polygons, options))
@@ -504,11 +521,11 @@ def _spread_layout_with_fixed_canvas(
         regularization = float(np.sum((vec - x0) ** 2))
         score = float(
             -soft_min_clearance
-            - options.spread_quantile_weight * q25_clearance
-            - options.spread_mean_weight * mean_log_clearance
-            + options.spread_overlap_weight * overlap
-            + options.spread_outside_weight * outside
-            + options.spread_regularization * regularization
+            - spread_objective_cfg.lower_quartile_spacing_weight * q25_clearance
+            - spread_objective_cfg.mean_spacing_weight * mean_log_clearance
+            + spread_objective_cfg.overlap_penalty_weight * overlap
+            + spread_objective_cfg.outside_canvas_penalty_weight * outside
+            + spread_objective_cfg.center_shift_regularization_weight * regularization
         )
         spread_progress.update(score=score, overlap=overlap)
         return score
@@ -516,10 +533,10 @@ def _spread_layout_with_fixed_canvas(
     best_result = None
     best_score = float("inf")
 
-    if options.spread_method.lower().strip() in {"lbfgsb", "hybrid"}:
+    if spread_phase.method.lower().strip() in {"lbfgsb", "hybrid"}:
         starts = [x0]
         rng = np.random.default_rng(options.random_seed if options.random_seed is not None else None)
-        for _ in range(max(0, options.spread_restarts - 1)):
+        for _ in range(max(0, spread_phase.lbfgsb.random_restart_count - 1)):
             jitter = rng.uniform(-0.18, 0.18, size=x0.shape)
             starts.append(np.clip(x0 + jitter, 0.0, 1.0))
     else:
@@ -530,14 +547,14 @@ def _spread_layout_with_fixed_canvas(
         logger.info("Spread restart %d/%d...", idx + 1, len(starts))
         result = _run_with_method(
             phase="spread",
-            method=options.spread_method,
+            method=spread_phase.method,
             objective=objective,
             x0=start,
             bounds=bounds,
-            maxiter=options.spread_maxiter,
-            de_maxiter=options.spread_de_maxiter,
-            de_popsize=options.spread_de_popsize,
-            workers=options.spread_workers,
+            maxiter=spread_phase.lbfgsb.max_iterations,
+            de_maxiter=spread_phase.differential_evolution.max_generations,
+            de_popsize=spread_phase.differential_evolution.population_size,
+            workers=spread_phase.differential_evolution.worker_count,
             seed=options.random_seed,
         )
         score = float(result.fun)
@@ -573,6 +590,11 @@ def _spread_layout_with_fixed_canvas(
 
 def optimize_pack(source_objects: list[SourceObject], options: PackOptions) -> tuple[list[PackedPlacement], tuple[int, int]]:
     """Pack polygons with normalized optimization and optional spread refinement."""
+    optimize_cfg = options.resolved_optimize_config()
+    phase1 = optimize_cfg.phase1
+    phase1_lbfgsb = phase1.lbfgsb
+    phase1_de = phase1.differential_evolution
+    phase1_obj_cfg = optimize_cfg.phase1_objective
     n = len(source_objects)
     if n == 0:
         raise ValueError("No source objects to pack.")
@@ -596,7 +618,8 @@ def optimize_pack(source_objects: list[SourceObject], options: PackOptions) -> t
     )
     phase1_progress = _ProgressTracker(
         phase="phase1",
-        interval=max(0, int(options.optimizer_progress_interval)),
+        interval=max(0, int(phase1.progress_log_every_evaluations)),
+        heartbeat_seconds=max(0.0, float(phase1.progress_log_heartbeat_seconds)),
     )
 
     jacobi_size = 2 * (n - 1)
@@ -628,9 +651,9 @@ def optimize_pack(source_objects: list[SourceObject], options: PackOptions) -> t
 
         score = float(
             area
-            + options.optimizer_overlap_weight * overlap
-            + options.optimizer_aspect_weight * aspect_penalty
-            + options.optimizer_regularization * regularization
+            + phase1_obj_cfg.overlap_penalty_weight * overlap
+            + phase1_obj_cfg.aspect_ratio_penalty_weight * aspect_penalty
+            + phase1_obj_cfg.jacobi_regularization_weight * regularization
         )
         phase1_progress.update(score=score, overlap=overlap, aspect_error=aspect_error)
         return score
@@ -645,23 +668,23 @@ def optimize_pack(source_objects: list[SourceObject], options: PackOptions) -> t
             score=float(result.fun),
         )
 
-    method = options.optimizer_method.lower().strip()
+    method = phase1.method.lower().strip()
     candidates: list[_Phase1Eval] = []
     if method in {"lbfgsb", "hybrid"}:
         rng = np.random.default_rng(options.random_seed if options.random_seed is not None else None)
         starts = [x0]
-        for _ in range(max(0, options.optimizer_restarts - 1)):
+        for _ in range(max(0, phase1_lbfgsb.random_restart_count - 1)):
             jitter = np.zeros_like(x0)
             if jacobi_size > 0:
                 jitter[:jacobi_size] = rng.uniform(-0.9, 0.9, size=jacobi_size)
             jitter[jacobi_size:] = rng.uniform(-0.25, 0.25, size=n)
             starts.append(np.clip(x0 + jitter, [-5.0] * jacobi_size + [0.0] * n, [5.0] * jacobi_size + [1.0] * n))
 
-        phase_iter = max(20, options.optimizer_maxiter // max(1, options.optimizer_alternating_cycles + 1))
+        phase_iter = max(20, phase1_lbfgsb.max_iterations // max(1, phase1_lbfgsb.alternating_refinement_cycles + 1))
         logger.info(
             "Phase1 local optimization: restarts=%d alternating_cycles=%d phase_iter=%d",
             len(starts),
-            options.optimizer_alternating_cycles,
+            phase1_lbfgsb.alternating_refinement_cycles,
             phase_iter,
         )
         for restart_idx, start in enumerate(starts):
@@ -674,18 +697,18 @@ def optimize_pack(source_objects: list[SourceObject], options: PackOptions) -> t
                 x0=current,
                 bounds=bounds,
                 maxiter=phase_iter,
-                de_maxiter=options.optimizer_de_maxiter,
-                de_popsize=options.optimizer_de_popsize,
-                workers=options.optimizer_workers,
+                de_maxiter=phase1_de.max_generations,
+                de_popsize=phase1_de.population_size,
+                workers=phase1_de.worker_count,
                 seed=options.random_seed,
             ).x
 
-            for cycle_idx in range(max(0, options.optimizer_alternating_cycles)):
+            for cycle_idx in range(max(0, phase1_lbfgsb.alternating_refinement_cycles)):
                 logger.debug(
                     "Phase1 restart %d cycle %d/%d",
                     restart_idx + 1,
                     cycle_idx + 1,
-                    options.optimizer_alternating_cycles,
+                    phase1_lbfgsb.alternating_refinement_cycles,
                 )
                 if jacobi_size > 0:
                     rot_fixed = current[jacobi_size:].copy()
@@ -742,10 +765,10 @@ def optimize_pack(source_objects: list[SourceObject], options: PackOptions) -> t
                 objective=objective,
                 x0=x0,
                 bounds=bounds,
-                maxiter=options.optimizer_maxiter,
-                de_maxiter=options.optimizer_de_maxiter,
-                de_popsize=options.optimizer_de_popsize,
-                workers=options.optimizer_workers,
+                maxiter=phase1_lbfgsb.max_iterations,
+                de_maxiter=phase1_de.max_generations,
+                de_popsize=phase1_de.population_size,
+                workers=phase1_de.worker_count,
                 seed=options.random_seed,
             )
             candidates.append(_eval_result(de_res))
@@ -756,10 +779,10 @@ def optimize_pack(source_objects: list[SourceObject], options: PackOptions) -> t
             objective=objective,
             x0=x0,
             bounds=bounds,
-            maxiter=options.optimizer_maxiter,
-            de_maxiter=options.optimizer_de_maxiter,
-            de_popsize=options.optimizer_de_popsize,
-            workers=options.optimizer_workers,
+            maxiter=phase1_lbfgsb.max_iterations,
+            de_maxiter=phase1_de.max_generations,
+            de_popsize=phase1_de.population_size,
+            workers=phase1_de.worker_count,
             seed=options.random_seed,
         )
         candidates.append(_eval_result(de_res))
@@ -839,14 +862,14 @@ def optimize_pack(source_objects: list[SourceObject], options: PackOptions) -> t
 
     width = max(1, int(math.ceil(max_x + shift_x)))
     height = max(1, int(math.ceil(max_y + shift_y)))
-    if options.enable_spread_phase:
+    if optimize_cfg.enable_spread_phase:
         base_polygons = [item.polygon for item in shifted]
         base_overlap = _total_overlap(_buffered(base_polygons, options))
         base_min_clearance, base_q25_clearance, base_mean_clearance = _clearance_stats(base_polygons, width, height)
         base_quality = (
             base_min_clearance
-            + options.spread_quantile_weight * base_q25_clearance
-            + options.spread_mean_weight * base_mean_clearance
+            + optimize_cfg.spread_objective.lower_quartile_spacing_weight * base_q25_clearance
+            + optimize_cfg.spread_objective.mean_spacing_weight * base_mean_clearance
         )
         spread_assets: list[_SpreadAsset] = []
         for placement in shifted:
@@ -869,13 +892,14 @@ def optimize_pack(source_objects: list[SourceObject], options: PackOptions) -> t
             shifted,
             (width, height),
             options,
+            optimize_cfg,
         )
         spread_polygons = [item.polygon for item in spread_placements]
         _, spread_q25_clearance, spread_mean_clearance = _clearance_stats(spread_polygons, width, height)
         spread_quality = (
             spread_min_clearance
-            + options.spread_quantile_weight * spread_q25_clearance
-            + options.spread_mean_weight * spread_mean_clearance
+            + optimize_cfg.spread_objective.lower_quartile_spacing_weight * spread_q25_clearance
+            + optimize_cfg.spread_objective.mean_spacing_weight * spread_mean_clearance
         )
         improves_overlap = spread_overlap <= base_overlap + 1e-3
         improves_quality = spread_quality >= base_quality + 0.05

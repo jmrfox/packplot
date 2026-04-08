@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Iterable
 
 from packplot.arrangement import Arrangement, ArrangementKeyFunc, ArrangementKeyMode, apply_arrangement, load_arrangement
+from packplot.external_packers import pack_with_cell_packing, pack_with_circpacker
 from packplot.extract import extract_source_objects
 from packplot.optimize import optimize_pack
 from packplot.packer import pack_polygons
@@ -74,8 +75,12 @@ def pack_images(
         placements, canvas_size = pack_polygons(source_objects, options)
     elif options.solver == "optimize":
         placements, canvas_size = optimize_pack(source_objects, options)
+    elif options.solver == "circpacker":
+        placements, canvas_size = pack_with_circpacker(source_objects, options)
+    elif options.solver == "cell_packing":
+        placements, canvas_size = pack_with_cell_packing(source_objects, options)
     else:
-        raise ValueError("Unknown solver. Expected 'heuristic' or 'optimize'.")
+        raise ValueError("Unknown solver. Expected 'heuristic', 'optimize', 'circpacker', or 'cell_packing'.")
     image = render_composition(canvas_size, placements, background_color=background_color)
     fill_ratio = sum(item.polygon.area for item in placements) / float(canvas_size[0] * canvas_size[1])
     logger.info(

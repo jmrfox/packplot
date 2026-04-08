@@ -4,7 +4,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from packplot import PackOptions, pack_images
+from packplot import pack_images
+from conftest import fast_opt_options
 
 
 def _make_shape(path: Path, shape: str) -> None:
@@ -27,15 +28,11 @@ def test_optimizer_solver_produces_layout(tmp_path: Path) -> None:
 
     result = pack_images(
         paths,
-        options=PackOptions(
-            solver="optimize",
-            optimizer_method="lbfgsb",
+        options=fast_opt_options(
             target_aspect_ratio=1.6,
             padding=2,
             edge_buffer=1.5,
             jacobi_inflation=1.1,
-            optimizer_maxiter=10,
-            enable_spread_phase=False,
         ),
     )
 

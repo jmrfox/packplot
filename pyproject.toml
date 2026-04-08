@@ -9,6 +9,8 @@ description = "Pack arbitrary 2D object images into rectangular figures."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "cell-packing",
+    "circpacker",
     "numpy>=2.4.4",
     "pillow>=12.2.0",
     "scipy>=1.17.1",
@@ -19,3 +21,7 @@ dependencies = [
 dev = [
     "pytest>=9.0.2",
 ]
+
+[tool.uv.sources]
+circpacker = { git = "https://github.com/aarizat/circpacker.git" }
+cell-packing = { git = "https://github.com/janniklasrose/cell-packing.git" }
