@@ -9,14 +9,14 @@ from conftest import fast_opt_options
 
 
 def _make_shape(path: Path, shape: str) -> None:
-    image = Image.new("RGBA", (42, 42), (255, 255, 255, 0))
+    image = Image.new("RGBA", (30, 30), (255, 255, 255, 0))
     draw = ImageDraw.Draw(image)
     if shape == "rect":
-        draw.rectangle((6, 10, 34, 30), fill=(20, 20, 20, 255))
+        draw.rectangle((4, 7, 25, 22), fill=(20, 20, 20, 255))
     elif shape == "tri":
-        draw.polygon(((21, 6), (36, 34), (6, 34)), fill=(20, 20, 20, 255))
+        draw.polygon(((15, 4), (26, 25), (4, 25)), fill=(20, 20, 20, 255))
     else:
-        draw.ellipse((7, 7, 35, 35), fill=(20, 20, 20, 255))
+        draw.ellipse((5, 5, 24, 24), fill=(20, 20, 20, 255))
     image.save(path)
 
 

@@ -9,14 +9,14 @@ from conftest import fast_opt_options
 
 
 def _make_shape(path: Path, kind: str, color: tuple[int, int, int]) -> None:
-    image = Image.new("RGBA", (64, 64), (255, 255, 255, 255))
+    image = Image.new("RGBA", (40, 40), (255, 255, 255, 255))
     draw = ImageDraw.Draw(image)
     if kind == "rect":
-        draw.rectangle((10, 20, 54, 44), fill=(*color, 255))
+        draw.rectangle((6, 12, 34, 28), fill=(*color, 255))
     elif kind == "tri":
-        draw.polygon(((32, 8), (56, 54), (8, 54)), fill=(*color, 255))
+        draw.polygon(((20, 5), (34, 34), (6, 34)), fill=(*color, 255))
     else:
-        draw.ellipse((12, 12, 52, 52), fill=(*color, 255))
+        draw.ellipse((8, 8, 32, 32), fill=(*color, 255))
     image.save(path)
 
 
@@ -114,3 +114,46 @@ def test_arrangement_key_function_maps_modalities(tmp_path: Path) -> None:
     )
     assert replay.canvas_size == base_result.canvas_size
     assert [p.top_left for p in replay.placements] == [p.top_left for p in base_result.placements]
+
+
+def test_arrangement_duplicate_keys_raise(tmp_path: Path) -> None:
+    p1 = tmp_path / "a.png"
+    p2 = tmp_path / "b.png"
+    _make_shape(p1, "rect", (200, 40, 40))
+    _make_shape(p2, "tri", (40, 200, 40))
+
+    result = pack_images([p1, p2], options=fast_opt_options())
+    try:
+        create_arrangement(result, key_func=lambda _p: "dup")
+        assert False, "Expected duplicate arrangement keys to fail."
+    except ValueError as exc:
+        assert "duplicate arrangement keys" in str(exc).lower()
+
+
+def test_apply_arrangement_duplicate_input_keys_raise(tmp_path: Path) -> None:
+    mesh_paths = [
+        tmp_path / "cellA_mesh.png",
+        tmp_path / "cellB_mesh.png",
+    ]
+    _make_shape(mesh_paths[0], "rect", (210, 30, 30))
+    _make_shape(mesh_paths[1], "tri", (30, 210, 30))
+    arrangement = create_arrangement(pack_images(mesh_paths, options=fast_opt_options()))
+
+    replay_paths = [
+        tmp_path / "cellA_skeleton.png",
+        tmp_path / "cellB_skeleton.png",
+    ]
+    _make_shape(replay_paths[0], "rect", (120, 120, 120))
+    _make_shape(replay_paths[1], "tri", (140, 140, 140))
+
+    try:
+        pack_images(
+            replay_paths,
+            options=PackOptions(),
+            arrangement=arrangement,
+            arrangement_key_func=lambda _p: "dup",
+            strict_arrangement=True,
+        )
+        assert False, "Expected duplicate keys during arrangement replay to fail."
+    except ValueError as exc:
+        assert "duplicate arrangement keys" in str(exc).lower()

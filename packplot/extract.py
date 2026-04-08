@@ -79,11 +79,9 @@ def _cut_image_to_hull(cropped_image: Image.Image, hull) -> Image.Image:
     return Image.fromarray(rgba, mode="RGBA")
 
 
-def extract_source_object(path: str | Path, options: PackOptions) -> SourceObject:
-    """Extract one image into a hull-clipped object and metadata."""
-    source_path = Path(path)
-    logger.info("Extracting source object from %s", source_path)
-    image_rgba = Image.open(source_path).convert("RGBA")
+def extract_source_object_from_image(source_path: str | Path, image_rgba: Image.Image, options: PackOptions) -> SourceObject:
+    """Extract one RGBA image object into a hull-clipped object and metadata."""
+    path_obj = Path(source_path)
     mask = _mask_from_rgba(image_rgba, options)
     background_color = _estimate_background_color(image_rgba, mask)
     cropped_image, cropped_mask = _crop_to_mask(image_rgba, mask)
@@ -95,7 +93,7 @@ def extract_source_object(path: str | Path, options: PackOptions) -> SourceObjec
     hull_image = _cut_image_to_hull(cropped_image, hull)
     logger.debug(
         "Extracted object %s -> crop=%s hull_crop=%s mask_pixels=%d hull_area=%.2f bg=%s",
-        source_path.name,
+        path_obj.name,
         cropped_image.size,
         hull_image.size,
         int(np.count_nonzero(cropped_mask)),
@@ -104,12 +102,20 @@ def extract_source_object(path: str | Path, options: PackOptions) -> SourceObjec
     )
 
     return SourceObject(
-        source_path=source_path,
+        source_path=path_obj,
         cropped_image=hull_image,
         mask=cropped_mask,
         hull=hull,
         background_color=background_color,
     )
+
+
+def extract_source_object(path: str | Path, options: PackOptions) -> SourceObject:
+    """Extract one image into a hull-clipped object and metadata."""
+    source_path = Path(path)
+    logger.info("Extracting source object from %s", source_path)
+    image_rgba = Image.open(source_path).convert("RGBA")
+    return extract_source_object_from_image(source_path, image_rgba, options)
 
 
 def extract_source_objects(paths: list[str | Path], options: PackOptions) -> list[SourceObject]:

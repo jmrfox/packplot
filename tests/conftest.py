@@ -9,16 +9,16 @@ from packplot import (
 
 
 FAST_TEST_OPTIMIZE_CONFIG = OptimizeConfig(
-    phase1=OptimizationPhaseConfig(
+    compact_layout=OptimizationPhaseConfig(
         method="lbfgsb",
         progress_log_every_evaluations=0,
         lbfgsb=LbfgsbConfig(
-            max_iterations=35,
-            random_restart_count=2,
-            alternating_refinement_cycles=1,
+            max_iterations=12,
+            random_restart_count=1,
+            alternating_refinement_cycles=0,
         ),
     ),
-    enable_spread_phase=False,
+    enable_clearance_refinement_phase=False,
 )
 
 

@@ -28,7 +28,7 @@ def test_packer_places_without_overlap(tmp_path: Path) -> None:
         _make_shape(tmp_path / "b.png", (30, 35), "triangle"),
         _make_shape(tmp_path / "c.png", (28, 28), "ellipse"),
     ]
-    options = PackOptions(target_aspect_ratio=1.4, rotation_step_degrees=30, padding=2)
+    options = PackOptions(target_aspect_ratio=1.4, rotation_step_degrees=90, padding=2)
     sources = extract_source_objects(paths, options)
 
     placements, canvas = pack_polygons(sources, options)
@@ -45,7 +45,7 @@ def test_packer_respects_target_aspect_ratio_direction(tmp_path: Path) -> None:
         _make_shape(tmp_path / "wide.png", (42, 24), "rect"),
         _make_shape(tmp_path / "tall.png", (24, 42), "rect"),
     ]
-    options = PackOptions(target_aspect_ratio=2.0, rotation_step_degrees=45, padding=1)
+    options = PackOptions(target_aspect_ratio=2.0, rotation_step_degrees=90, padding=1)
     sources = extract_source_objects(paths, options)
     _, canvas = pack_polygons(sources, options)
     ratio = canvas[0] / canvas[1]

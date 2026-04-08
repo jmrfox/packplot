@@ -2,19 +2,28 @@
 
 from packplot.arrangement import Arrangement, ArrangementKeyFunc, create_arrangement, load_arrangement, save_arrangement
 from packplot.pipeline import pack_images
+from packplot.problem import PackingProblem, build_packing_problem
+from packplot.solvers import LayoutSolver, get_solver
+from packplot.source_loaders import (
+    MixedSourceLoader,
+    RasterSourceLoader,
+    SourceLoader,
+    SvgSourceLoader,
+    get_source_loader,
+    infer_source_loader_name,
+)
 from packplot.types import (
-    CellPackingConfig,
-    CircPackerConfig,
+    ClearanceRefinementObjectiveConfig,
+    CompactLayoutObjectiveConfig,
     DifferentialEvolutionConfig,
     LbfgsbConfig,
     OptimizeConfig,
     OptimizationPhaseConfig,
     PackOptions,
-    Phase1ObjectiveConfig,
     PackResult,
     PackedPlacement,
+    SolverMetadata,
     SourceObject,
-    SpreadObjectiveConfig,
 )
 
 __all__ = [
@@ -24,16 +33,25 @@ __all__ = [
     "save_arrangement",
     "load_arrangement",
     "pack_images",
+    "PackingProblem",
+    "build_packing_problem",
+    "LayoutSolver",
+    "get_solver",
+    "SourceLoader",
+    "RasterSourceLoader",
+    "SvgSourceLoader",
+    "MixedSourceLoader",
+    "get_source_loader",
+    "infer_source_loader_name",
     "PackOptions",
-    "CircPackerConfig",
-    "CellPackingConfig",
     "OptimizeConfig",
     "OptimizationPhaseConfig",
     "LbfgsbConfig",
     "DifferentialEvolutionConfig",
-    "Phase1ObjectiveConfig",
-    "SpreadObjectiveConfig",
+    "CompactLayoutObjectiveConfig",
+    "ClearanceRefinementObjectiveConfig",
     "PackResult",
     "PackedPlacement",
+    "SolverMetadata",
     "SourceObject",
 ]

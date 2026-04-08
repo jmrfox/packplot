@@ -8,8 +8,6 @@ from pathlib import Path
 
 from PIL import Image
 from packplot import (
-    CellPackingConfig,
-    CircPackerConfig,
     LbfgsbConfig,
     OptimizeConfig,
     OptimizationPhaseConfig,
@@ -50,7 +48,7 @@ def _options_for_solver(solver: str, aspect_ratio: float) -> PackOptions:
         return PackOptions(
             **common,
             optimize_config=OptimizeConfig(
-                phase1=OptimizationPhaseConfig(
+                compact_layout=OptimizationPhaseConfig(
                     method="lbfgsb",
                     progress_log_every_evaluations=2000,
                     lbfgsb=LbfgsbConfig(
@@ -59,8 +57,8 @@ def _options_for_solver(solver: str, aspect_ratio: float) -> PackOptions:
                         alternating_refinement_cycles=2,
                     ),
                 ),
-                enable_spread_phase=True,
-                spread=OptimizationPhaseConfig(
+                enable_clearance_refinement_phase=True,
+                clearance_refinement=OptimizationPhaseConfig(
                     method="lbfgsb",
                     progress_log_every_evaluations=1200,
                     lbfgsb=LbfgsbConfig(
@@ -79,25 +77,6 @@ def _options_for_solver(solver: str, aspect_ratio: float) -> PackOptions:
             fill_ratio=0.25,
             max_grow_steps=16,
             grow_factor=1.2,
-        )
-    if solver == "circpacker":
-        return PackOptions(
-            **common,
-            circpacker_config=CircPackerConfig(
-                initial_depth=3,
-                max_depth=6,
-                max_canvas_growth_steps=4,
-                canvas_growth_factor=1.15,
-            ),
-        )
-    if solver == "cell_packing":
-        return PackOptions(
-            **common,
-            cell_packing_config=CellPackingConfig(
-                iterations=120,
-                attraction_step=0.55,
-                repulsion_step=1.9,
-            ),
         )
     raise ValueError(f"Unsupported solver '{solver}'")
 
@@ -129,7 +108,7 @@ def main() -> None:
         ("even3_landscape", _subset_every_other(all_images, 0)[: min(3, len(all_images))], 16 / 9),
         ("random3_wide", random_subset, 2.0),
     ]
-    solver_order = ["optimize", "heuristic", "circpacker", "cell_packing"]
+    solver_order = ["optimize", "heuristic"]
 
     logger.info("Found %d source images in %s", len(all_images), inputs_dir)
     for case_name, subset, aspect_ratio in demo_cases:

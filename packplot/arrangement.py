@@ -50,6 +50,18 @@ def _key_for_path(path: Path, key_mode: ArrangementKeyMode, key_func: Arrangemen
     raise ValueError("Unknown arrangement key mode. Expected 'stem' or 'name'.")
 
 
+def _raise_on_duplicate_keys(keys: list[str], *, context: str) -> None:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for key in keys:
+        if key in seen:
+            duplicates.add(key)
+        seen.add(key)
+    if duplicates:
+        dupes = ", ".join(sorted(duplicates))
+        raise ValueError(f"Duplicate arrangement keys detected in {context}: {dupes}")
+
+
 def create_arrangement(
     result: PackResult,
     *,
@@ -59,16 +71,20 @@ def create_arrangement(
     """Create a reusable arrangement from a prior `pack_images` result."""
     width, height = result.canvas_size
     entries: list[ArrangementEntry] = []
+    keys: list[str] = []
     for placement in result.placements:
         cx, cy = placement.polygon.centroid.x, placement.polygon.centroid.y
+        key = _key_for_path(placement.source_path, key_mode, key_func)
+        keys.append(key)
         entries.append(
             ArrangementEntry(
-                key=_key_for_path(placement.source_path, key_mode, key_func),
+                key=key,
                 center_norm=(float(cx / width), float(cy / height)),
                 angle_degrees=float(placement.angle_degrees),
                 flipped=bool(placement.flipped),
             )
         )
+    _raise_on_duplicate_keys(keys, context="create_arrangement inputs")
     return Arrangement(
         version=1,
         canvas_size=result.canvas_size,
@@ -132,7 +148,11 @@ def apply_arrangement(
     strict: bool = True,
 ) -> tuple[list[PackedPlacement], tuple[int, int], tuple[int, int, int]]:
     """Apply a saved arrangement to a new source set."""
-    source_by_key = {_key_for_path(source.source_path, key_mode, key_func): source for source in source_objects}
+    source_keys = [_key_for_path(source.source_path, key_mode, key_func) for source in source_objects]
+    _raise_on_duplicate_keys(source_keys, context="current input sources")
+    arrangement_keys = [entry.key for entry in arrangement.entries]
+    _raise_on_duplicate_keys(arrangement_keys, context="arrangement entries")
+    source_by_key = {key: source for key, source in zip(source_keys, source_objects)}
     width, height = arrangement.canvas_size
 
     placements: list[PackedPlacement] = []
