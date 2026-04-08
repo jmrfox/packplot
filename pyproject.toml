@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "packplot"
+version = "0.1.0"
+description = "Pack arbitrary 2D object images into rectangular figures."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.4.4",
+    "pillow>=12.2.0",
+    "scipy>=1.17.1",
+    "shapely>=2.1.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
