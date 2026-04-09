@@ -85,7 +85,7 @@ def test_pymoo_ranking_is_deterministic_with_fixed_seed(tmp_path: Path) -> None:
     )
     options = replace(
         options,
-        optimize_config=replace(options.optimize_config, compact_to_clearance_beam_width=3),
+        pipeline_config=replace(options.pipeline_config, pack_to_refine_beam_width=3),
         random_seed=123,
     )
 

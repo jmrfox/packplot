@@ -52,10 +52,10 @@ def test_compact_layout_nsga2_method_runs(tmp_path: Path) -> None:
     _make_shape(paths[2], "ellipse")
     base = fast_opt_options(target_aspect_ratio=1.2, padding=2)
     nsga2_cfg = replace(
-        base.optimize_config,
-        compact_layout=replace(base.optimize_config.compact_layout, method="nsga2"),
-        enable_clearance_refinement_phase=False,
+        base.pipeline_config,
+        pack_phase=replace(base.pipeline_config.pack_phase, optimizer="scipy-nsga2"),
+        enable_refine_phase=False,
     )
-    results = pack_images(paths, options=replace(base, optimize_config=nsga2_cfg))
+    results = pack_images(paths, options=replace(base, pipeline_config=nsga2_cfg))
     assert len(results) >= 1
     assert results[0].canvas_size[0] > 0

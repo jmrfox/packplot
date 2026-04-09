@@ -2,17 +2,16 @@ from __future__ import annotations
 
 from packplot import (
     LbfgsbConfig,
-    OptimizeConfig,
-    OptimizationPhaseConfig,
+    PipelineConfig,
+    SolverConfig,
     PackOptions,
     PymooConfig,
 )
 
 
-FAST_TEST_OPTIMIZE_CONFIG = OptimizeConfig(
-    compact_layout_backend="optimize",
-    compact_layout=OptimizationPhaseConfig(
-        method="lbfgsb",
+FAST_TEST_PIPELINE_CONFIG = PipelineConfig(
+    pack_phase=SolverConfig(
+        optimizer="scipy-lbfgsb",
         progress_log_every_evaluations=0,
         lbfgsb=LbfgsbConfig(
             max_iterations=12,
@@ -20,24 +19,24 @@ FAST_TEST_OPTIMIZE_CONFIG = OptimizeConfig(
             alternating_refinement_cycles=0,
         ),
     ),
-    enable_clearance_refinement_phase=False,
+    enable_refine_phase=False,
 )
 
 
 def fast_opt_options(**kwargs) -> PackOptions:
     """Small helper for fast, deterministic optimizer-based tests."""
-    optimize_config = kwargs.pop("optimize_config", FAST_TEST_OPTIMIZE_CONFIG)
+    pipeline_config = kwargs.pop("pipeline_config", FAST_TEST_PIPELINE_CONFIG)
     return PackOptions(
-        optimize_config=optimize_config,
+        pipeline_config=pipeline_config,
         **kwargs,
     )
 
 
 def fast_pymoo_options(**kwargs) -> PackOptions:
     """Small helper for fast pymoo solver tests."""
-    optimize_config = kwargs.pop(
-        "optimize_config",
-        OptimizeConfig(compact_layout_backend="pymoo"),
+    pipeline_config = kwargs.pop(
+        "pipeline_config",
+        PipelineConfig(pack_phase=SolverConfig(optimizer="pymoo-nsga2")),
     )
     pymoo_config = kwargs.pop(
         "pymoo_config",
@@ -50,7 +49,7 @@ def fast_pymoo_options(**kwargs) -> PackOptions:
         ),
     )
     return PackOptions(
-        optimize_config=optimize_config,
+        pipeline_config=pipeline_config,
         pymoo_config=pymoo_config,
         **kwargs,
     )

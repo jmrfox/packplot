@@ -4,7 +4,6 @@ from packplot.arrangement import Arrangement, ArrangementKeyFunc, create_arrange
 from packplot.output_backends import list_output_backends, render_result_with_backend
 from packplot.pipeline import pack_images
 from packplot.problem import PackingProblem, build_packing_problem
-from packplot.solvers import LayoutSolver, get_solver
 from packplot.source_loaders import (
     MixedSourceLoader,
     RasterSourceLoader,
@@ -14,13 +13,13 @@ from packplot.source_loaders import (
     infer_source_loader_name,
 )
 from packplot.types import (
-    ClearanceRefinementObjectiveConfig,
-    CompactLayoutObjectiveConfig,
+    RefineObjectiveConfig,
+    PackObjectiveConfig,
     DifferentialEvolutionConfig,
     InitializationConfig,
     LbfgsbConfig,
-    OptimizeConfig,
-    OptimizationPhaseConfig,
+    PipelineConfig,
+    SolverConfig,
     PackOptions,
     PackResult,
     PackedPlacement,
@@ -39,8 +38,6 @@ __all__ = [
     "render_result_with_backend",
     "PackingProblem",
     "build_packing_problem",
-    "LayoutSolver",
-    "get_solver",
     "SourceLoader",
     "RasterSourceLoader",
     "SvgSourceLoader",
@@ -49,13 +46,13 @@ __all__ = [
     "infer_source_loader_name",
     "PackOptions",
     "InitializationConfig",
-    "OptimizeConfig",
-    "OptimizationPhaseConfig",
+    "PipelineConfig",
+    "SolverConfig",
     "PymooConfig",
     "LbfgsbConfig",
     "DifferentialEvolutionConfig",
-    "CompactLayoutObjectiveConfig",
-    "ClearanceRefinementObjectiveConfig",
+    "PackObjectiveConfig",
+    "RefineObjectiveConfig",
     "PackResult",
     "PackedPlacement",
     "SourceObject",

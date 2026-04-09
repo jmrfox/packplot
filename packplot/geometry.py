@@ -42,6 +42,12 @@ def convex_hull_from_points(points_xy: np.ndarray) -> Polygon:
 
 
 def apply_orientation(image: Image.Image, polygon: Polygon, orientation: Orientation) -> OrientedAsset:
+    """Rotate (and optionally flip) an image+polygon, keeping them aligned.
+
+    The polygon is rotated around the image center (matching PIL's
+    rotation centre) and shifted for canvas expansion so its coordinates
+    stay in the returned image's pixel space.
+    """
     transformed_image = image
     transformed_polygon = polygon
     center = (image.width / 2.0, image.height / 2.0)
@@ -56,20 +62,24 @@ def apply_orientation(image: Image.Image, polygon: Polygon, orientation: Orienta
         )
 
     if orientation.angle_degrees % 360 != 0:
+        old_w, old_h = transformed_image.size
         transformed_image = transformed_image.rotate(
             orientation.angle_degrees,
             expand=True,
             resample=Image.Resampling.BICUBIC,
         )
+        new_w, new_h = transformed_image.size
         transformed_polygon = affinity.rotate(
             transformed_polygon,
             orientation.angle_degrees,
             origin=center,
             use_radians=False,
         )
-
-    min_x, min_y, _, _ = transformed_polygon.bounds
-    transformed_polygon = affinity.translate(transformed_polygon, xoff=-min_x, yoff=-min_y)
+        transformed_polygon = affinity.translate(
+            transformed_polygon,
+            xoff=(new_w - old_w) / 2.0,
+            yoff=(new_h - old_h) / 2.0,
+        )
 
     return OrientedAsset(
         image=transformed_image,

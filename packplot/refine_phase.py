@@ -1,5 +1,12 @@
+"""Refine phase: improve spacing between shapes on a fixed canvas.
+
+Contains the refine-phase objective, center-based variable mapping, the
+numerical solver, overlap repair, integer-grid cleanup, and a quality
+gate that rejects refinements that make the layout worse.
+"""
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,7 +17,7 @@ from scipy.optimize import OptimizeResult
 from shapely import affinity
 from shapely.geometry import Polygon
 
-from packplot.optimize_objectives import (
+from packplot.layout_metrics import (
     buffered,
     clearance_stats,
     clearance_values,
@@ -18,8 +25,15 @@ from packplot.optimize_objectives import (
     softmin,
     total_overlap,
 )
-from packplot.types import OptimizeConfig, PackOptions, PackedPlacement
+from packplot.optimizer import ProgressTracker, run_with_method
+from packplot.types import PipelineConfig, PackOptions, PackedPlacement
 
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
 
 @dataclass
 class ClearanceAsset:
@@ -36,6 +50,10 @@ class ClearanceRefinementRunResult:
     nit: int | None
     message: str
 
+
+# ---------------------------------------------------------------------------
+# Geometry helpers
+# ---------------------------------------------------------------------------
 
 def project_centers_inside_canvas(
     centers: np.ndarray,
@@ -92,6 +110,10 @@ def placements_from_centers(
     return placements
 
 
+# ---------------------------------------------------------------------------
+# Overlap repair and integer-grid cleanup
+# ---------------------------------------------------------------------------
+
 def repair_centers_for_overlap(
     assets: list[ClearanceAsset],
     centers: np.ndarray,
@@ -142,14 +164,8 @@ def cleanup_integer_overlaps(
     width, height = canvas_size
     current = placements[:]
     directions = [
-        (1, 0),
-        (-1, 0),
-        (0, 1),
-        (0, -1),
-        (1, 1),
-        (1, -1),
-        (-1, 1),
-        (-1, -1),
+        (1, 0), (-1, 0), (0, 1), (0, -1),
+        (1, 1), (1, -1), (-1, 1), (-1, -1),
     ]
 
     def score(items: list[PackedPlacement]) -> float:
@@ -199,16 +215,17 @@ def cleanup_integer_overlaps(
     return current
 
 
-def run_clearance_refinement_with_fixed_canvas(
+# ---------------------------------------------------------------------------
+# Core refine-phase numerical solver
+# ---------------------------------------------------------------------------
+
+def _run_refine_optimization(
     *,
     assets: list[ClearanceAsset],
     placements: list[PackedPlacement],
     canvas_size: tuple[int, int],
     options: PackOptions,
-    optimize_cfg: OptimizeConfig,
-    run_with_method,
-    progress_tracker_cls,
-    logger,
+    pipeline_cfg: PipelineConfig,
 ) -> tuple[list[PackedPlacement], float, float, ClearanceRefinementRunResult]:
     width, height = canvas_size
     n = len(assets)
@@ -216,9 +233,7 @@ def run_clearance_refinement_with_fixed_canvas(
         overlap = total_overlap(buffered([item.polygon for item in placements], options))
         min_clearance = float(np.min(clearance_values([item.polygon for item in placements], width, height)))
         return (
-            placements,
-            min_clearance,
-            overlap,
+            placements, min_clearance, overlap,
             ClearanceRefinementRunResult(success=True, nit=0, message="Skipped (<=1 shape)."),
         )
 
@@ -231,64 +246,71 @@ def run_clearance_refinement_with_fixed_canvas(
     def polygons_from_vector(vec: np.ndarray) -> tuple[list[Polygon], np.ndarray]:
         centers = np.column_stack((vec[0::2] * width, vec[1::2] * height))
         centers = project_centers_inside_canvas(centers, assets, width, height)
-        polygons = [polygon_at_center(assets[i].local_polygon, centers[i]) for i in range(n)]
-        return polygons, centers
+        polys = [polygon_at_center(assets[i].local_polygon, centers[i]) for i in range(n)]
+        return polys, centers
 
     init_polys, _ = polygons_from_vector(x0)
     init_clearance, init_q25, init_mean = clearance_stats(init_polys, width, height)
-    clearance_phase = optimize_cfg.clearance_refinement
-    clearance_objective_cfg = optimize_cfg.clearance_refinement_objective
-    clearance_progress = progress_tracker_cls(
-        phase="clearance_refinement",
-        interval=max(0, int(clearance_phase.progress_log_every_evaluations)),
-        heartbeat_seconds=max(0.0, float(clearance_phase.progress_log_heartbeat_seconds)),
+    refine_cfg = pipeline_cfg.refine_phase
+    obj_cfg = pipeline_cfg.refine_objective
+
+    refine_progress = ProgressTracker(
+        phase="refine",
+        interval=max(0, int(refine_cfg.progress_log_every_evaluations)),
+        heartbeat_seconds=max(0.0, float(refine_cfg.progress_log_heartbeat_seconds)),
     )
 
     def objective(vec: np.ndarray) -> float:
-        polygons, _ = polygons_from_vector(vec)
-        values = clearance_values(polygons, width, height)
-        soft_min_clearance = softmin(values, clearance_objective_cfg.softmin_smoothness)
+        polys, _ = polygons_from_vector(vec)
+        values = clearance_values(polys, width, height)
+        soft_min_clearance = softmin(values, obj_cfg.softmin_smoothness)
         q25_clearance = float(np.quantile(values, 0.25))
         mean_log_clearance = float(np.mean(np.log1p(values)))
-        overlap = total_overlap(buffered(polygons, options))
-        outside = outside_violation(polygons, width, height)
+        overlap = total_overlap(buffered(polys, options))
+        outside = outside_violation(polys, width, height)
         regularization = float(np.sum((vec - x0) ** 2))
         score = float(
             -soft_min_clearance
-            - clearance_objective_cfg.lower_quartile_spacing_weight * q25_clearance
-            - clearance_objective_cfg.mean_spacing_weight * mean_log_clearance
-            + clearance_objective_cfg.overlap_penalty_weight * overlap
-            + clearance_objective_cfg.outside_canvas_penalty_weight * outside
-            + clearance_objective_cfg.center_shift_regularization_weight * regularization
+            - obj_cfg.lower_quartile_spacing_weight * q25_clearance
+            - obj_cfg.mean_spacing_weight * mean_log_clearance
+            + obj_cfg.overlap_penalty_weight * overlap
+            + obj_cfg.outside_canvas_penalty_weight * outside
+            + obj_cfg.center_shift_regularization_weight * regularization
         )
-        clearance_progress.update(score=score, overlap=overlap)
+        refine_progress.update(score=score, overlap=overlap)
         return score
+
+    optimizer = refine_cfg.optimizer.lower().strip()
+    if optimizer.startswith("scipy-"):
+        method = optimizer.replace("scipy-", "", 1)
+    elif optimizer == "pymoo-nsga2":
+        method = "nsga2"
+    else:
+        raise ValueError(
+            "Unsupported refine phase optimizer. Expected one of: "
+            "'scipy-lbfgsb', 'scipy-de', 'scipy-hybrid', 'scipy-nsga2', 'pymoo-nsga2'."
+        )
 
     best_result: OptimizeResult | None = None
     best_score = float("inf")
-
-    if clearance_phase.method.lower().strip() in {"lbfgsb", "hybrid"}:
+    if method in {"lbfgsb", "hybrid"}:
         starts = [x0]
         rng = np.random.default_rng(options.random_seed if options.random_seed is not None else None)
-        for _ in range(max(0, clearance_phase.lbfgsb.random_restart_count - 1)):
+        for _ in range(max(0, refine_cfg.lbfgsb.random_restart_count - 1)):
             jitter = rng.uniform(-0.18, 0.18, size=x0.shape)
             starts.append(np.clip(x0 + jitter, 0.0, 1.0))
     else:
         starts = [x0]
 
-    logger.info("Clearance-refinement phase starting with %d restart(s).", len(starts))
+    logger.info("Refine phase starting with %d restart(s).", len(starts))
     for idx, start in enumerate(starts):
-        logger.info("Clearance-refinement restart %d/%d...", idx + 1, len(starts))
+        logger.info("Refine phase restart %d/%d...", idx + 1, len(starts))
         result = run_with_method(
-            phase="clearance_refinement",
-            method=clearance_phase.method,
-            objective=objective,
-            x0=start,
-            bounds=bounds,
-            maxiter=clearance_phase.lbfgsb.max_iterations,
-            de_maxiter=clearance_phase.differential_evolution.max_generations,
-            de_popsize=clearance_phase.differential_evolution.population_size,
-            workers=clearance_phase.differential_evolution.worker_count,
+            phase="refine", method=method, objective=objective, x0=start,
+            bounds=bounds, maxiter=refine_cfg.lbfgsb.max_iterations,
+            de_maxiter=refine_cfg.differential_evolution.max_generations,
+            de_popsize=refine_cfg.differential_evolution.population_size,
+            workers=refine_cfg.differential_evolution.worker_count,
             seed=options.random_seed,
         )
         score = float(result.fun)
@@ -298,23 +320,17 @@ def run_clearance_refinement_with_fixed_canvas(
 
     assert best_result is not None
     if not best_result.success:
-        logger.warning("Clearance-refinement phase did not fully converge: %s", best_result.message)
+        logger.warning("Refine phase did not fully converge: %s", best_result.message)
     else:
-        logger.info("Clearance-refinement phase converged in %d iterations.", best_result.nit)
+        logger.info("Refine phase converged in %d iterations.", best_result.nit)
 
-    final_vec = best_result.x
-    final_polys, final_centers = polygons_from_vector(final_vec)
+    final_polys, final_centers = polygons_from_vector(best_result.x)
     final_centers = repair_centers_for_overlap(assets, final_centers, width, height, options)
     final_polys = polygons_from_centers(assets, final_centers)
     final_clearance, final_q25, final_mean = clearance_stats(final_polys, width, height)
     logger.info(
-        "Clearance-refinement stats: min %.3f->%.3f q25 %.3f->%.3f mean %.3f->%.3f",
-        init_clearance,
-        final_clearance,
-        init_q25,
-        final_q25,
-        init_mean,
-        final_mean,
+        "Refine phase stats: min %.3f->%.3f q25 %.3f->%.3f mean %.3f->%.3f",
+        init_clearance, final_clearance, init_q25, final_q25, init_mean, final_mean,
     )
 
     refined_placements = placements_from_centers(assets, final_centers, width, height)
@@ -325,3 +341,82 @@ def run_clearance_refinement_with_fixed_canvas(
         message=str(best_result.message),
     )
     return refined_placements, final_clearance, refined_overlap, run_result
+
+
+# ---------------------------------------------------------------------------
+# Quality gate: accept refinement only if it actually improves the layout
+# ---------------------------------------------------------------------------
+
+def refine_with_quality_gate(
+    placements: list[PackedPlacement],
+    canvas_size: tuple[int, int],
+    options: PackOptions,
+    pipeline_cfg: PipelineConfig,
+) -> tuple[list[PackedPlacement], int | None, bool | None]:
+    """Run the refine phase and accept results only if quality improves."""
+    width, height = canvas_size
+    if not pipeline_cfg.enable_refine_phase:
+        return placements, 0, True
+    if len(placements) <= 1:
+        return placements, 0, True
+
+    base_polygons = [item.polygon for item in placements]
+    base_overlap = total_overlap(buffered(base_polygons, options))
+    base_min_clearance, base_q25, base_mean = clearance_stats(base_polygons, width, height)
+    base_quality = (
+        base_min_clearance
+        + pipeline_cfg.refine_objective.lower_quartile_spacing_weight * base_q25
+        + pipeline_cfg.refine_objective.mean_spacing_weight * base_mean
+    )
+
+    assets: list[ClearanceAsset] = []
+    for placement in placements:
+        local_polygon = affinity.translate(
+            placement.polygon,
+            xoff=-placement.top_left[0],
+            yoff=-placement.top_left[1],
+        )
+        assets.append(
+            ClearanceAsset(
+                source_path=placement.source_path,
+                image=placement.image,
+                local_polygon=local_polygon,
+                angle_degrees=placement.angle_degrees,
+                flipped=placement.flipped,
+            )
+        )
+
+    refined_placements, refined_min_clearance, refined_overlap, refinement_result = _run_refine_optimization(
+        assets=assets, placements=placements, canvas_size=canvas_size,
+        options=options, pipeline_cfg=pipeline_cfg,
+    )
+    refined_polygons = [item.polygon for item in refined_placements]
+    _, refined_q25, refined_mean = clearance_stats(refined_polygons, width, height)
+    refined_quality = (
+        refined_min_clearance
+        + pipeline_cfg.refine_objective.lower_quartile_spacing_weight * refined_q25
+        + pipeline_cfg.refine_objective.mean_spacing_weight * refined_mean
+    )
+
+    improves_overlap = refined_overlap <= base_overlap + 1e-3
+    improves_quality = refined_quality >= base_quality + 0.05
+    fixes_meaningful_overlap = base_overlap > 1e-3 and refined_overlap < 0.5 * base_overlap
+    if improves_overlap and (improves_quality or fixes_meaningful_overlap):
+        logger.info(
+            "Accepting refine phase: overlap %.6f -> %.6f, quality %.3f -> %.3f",
+            base_overlap, refined_overlap, base_quality, refined_quality,
+        )
+        return (
+            refined_placements,
+            int(refinement_result.nit) if refinement_result.nit is not None else None,
+            bool(refinement_result.success),
+        )
+    logger.warning(
+        "Rejecting refine phase: overlap %.6f -> %.6f, quality %.3f -> %.3f",
+        base_overlap, refined_overlap, base_quality, refined_quality,
+    )
+    return (
+        placements,
+        int(refinement_result.nit) if refinement_result.nit is not None else None,
+        bool(refinement_result.success),
+    )

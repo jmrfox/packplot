@@ -29,10 +29,10 @@ class DifferentialEvolutionConfig:
 
 
 @dataclass(frozen=True)
-class OptimizationPhaseConfig:
+class SolverConfig:
     """Optimizer settings for one optimization stage."""
 
-    method: str = "lbfgsb"  # "lbfgsb", "de", "hybrid", "nsga2"
+    optimizer: str = "scipy-lbfgsb"  # "scipy-lbfgsb", "scipy-de", "scipy-hybrid", "scipy-nsga2", "pymoo-nsga2"
     progress_log_every_evaluations: int = 500
     progress_log_heartbeat_seconds: float = 5.0
     lbfgsb: LbfgsbConfig = field(default_factory=LbfgsbConfig)
@@ -40,8 +40,8 @@ class OptimizationPhaseConfig:
 
 
 @dataclass(frozen=True)
-class CompactLayoutObjectiveConfig:
-    """Objective weights used during compact-layout optimization."""
+class PackObjectiveConfig:
+    """Objective weights used during pack-phase optimization."""
 
     overlap_penalty_weight: float = 1e5
     aspect_ratio_penalty_weight: float = 1e3
@@ -49,8 +49,8 @@ class CompactLayoutObjectiveConfig:
 
 
 @dataclass(frozen=True)
-class ClearanceRefinementObjectiveConfig:
-    """Objective weights used during fixed-canvas clearance refinement."""
+class RefineObjectiveConfig:
+    """Objective weights used during fixed-canvas refine phase."""
 
     softmin_smoothness: float = 20.0
     lower_quartile_spacing_weight: float = 0.35
@@ -61,18 +61,17 @@ class ClearanceRefinementObjectiveConfig:
 
 
 @dataclass(frozen=True)
-class OptimizeConfig:
-    """Complete optimization configuration grouped by phase and objective."""
+class PipelineConfig:
+    """Two-phase pipeline configuration grouped by phase and objective."""
 
-    compact_layout_backend: str = "optimize"  # "optimize" or "pymoo"
-    compact_layout: OptimizationPhaseConfig = field(default_factory=OptimizationPhaseConfig)
-    compact_layout_best_count: int = 1
-    compact_to_clearance_beam_width: int = 1
-    enable_clearance_refinement_phase: bool = True
-    clearance_refinement: OptimizationPhaseConfig = field(default_factory=OptimizationPhaseConfig)
-    compact_layout_objective: CompactLayoutObjectiveConfig = field(default_factory=CompactLayoutObjectiveConfig)
-    clearance_refinement_objective: ClearanceRefinementObjectiveConfig = field(
-        default_factory=ClearanceRefinementObjectiveConfig
+    pack_phase: SolverConfig = field(default_factory=SolverConfig)
+    pack_best_count: int = 1
+    pack_to_refine_beam_width: int = 1
+    enable_refine_phase: bool = True
+    refine_phase: SolverConfig = field(default_factory=SolverConfig)
+    pack_objective: PackObjectiveConfig = field(default_factory=PackObjectiveConfig)
+    refine_objective: RefineObjectiveConfig = field(
+        default_factory=RefineObjectiveConfig
     )
 
 
@@ -91,7 +90,7 @@ class PymooConfig:
 
 @dataclass(frozen=True)
 class InitializationConfig:
-    """Configuration for compact-layout initialization before optimization."""
+    """Configuration for pack-phase initialization before optimization."""
 
     method: str = "grid"  # "grid" or "randomized_grid"
     grid_spacing: float = 1.25
@@ -114,13 +113,10 @@ class PackOptions:
     max_grow_steps: int = 12
     grow_factor: float = 1.15
     initialization_config: InitializationConfig = field(default_factory=InitializationConfig)
-    optimize_config: OptimizeConfig = field(default_factory=OptimizeConfig)
+    pipeline_config: PipelineConfig = field(default_factory=PipelineConfig)
     pymoo_config: PymooConfig = field(default_factory=PymooConfig)
     random_seed: int | None = 0
 
-    def resolved_optimize_config(self) -> OptimizeConfig:
-        """Return optimization config currently attached to this options object."""
-        return self.optimize_config
 
 
 @dataclass

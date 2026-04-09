@@ -8,8 +8,8 @@ from pathlib import Path
 
 from packplot import (
     LbfgsbConfig,
-    OptimizeConfig,
-    OptimizationPhaseConfig,
+    PipelineConfig,
+    SolverConfig,
     PackOptions,
     PymooConfig,
     pack_images,
@@ -29,39 +29,49 @@ def _options_for_solver(solver: str, aspect_ratio: float) -> PackOptions:
         padding=2,
         edge_buffer=1.0,
     )
-    if solver == "optimize":
+    if solver == "scipy-lbfgsb":
         return PackOptions(
             **common,
-            optimize_config=OptimizeConfig(
-                compact_layout_backend="optimize",
-                compact_layout=OptimizationPhaseConfig(
-                    method="lbfgsb",
+            pipeline_config=PipelineConfig(
+                pack_phase=SolverConfig(
+                    optimizer="scipy-lbfgsb",
                     progress_log_every_evaluations=2000,
                     lbfgsb=LbfgsbConfig(
-                        max_iterations=220,
+                        max_iterations=600,
+                        random_restart_count=8,
+                        alternating_refinement_cycles=3,
+                    ),
+                ),
+                enable_refine_phase=True,
+                refine_phase=SolverConfig(
+                    optimizer="scipy-lbfgsb",
+                    progress_log_every_evaluations=1200,
+                    lbfgsb=LbfgsbConfig(
+                        max_iterations=400,
                         random_restart_count=4,
                         alternating_refinement_cycles=2,
                     ),
                 ),
-                enable_clearance_refinement_phase=True,
-                clearance_refinement=OptimizationPhaseConfig(
-                    method="lbfgsb",
-                    progress_log_every_evaluations=1200,
+            ),
+        )
+    if solver == "pymoo-nsga2":
+        return PackOptions(
+            **common,
+            pipeline_config=PipelineConfig(
+                pack_phase=SolverConfig(optimizer="pymoo-nsga2"),
+                enable_refine_phase=True,
+                refine_phase=SolverConfig(
+                    optimizer="scipy-lbfgsb",
                     lbfgsb=LbfgsbConfig(
-                        max_iterations=120,
-                        random_restart_count=2,
-                        alternating_refinement_cycles=1,
+                        max_iterations=400,
+                        random_restart_count=4,
+                        alternating_refinement_cycles=2,
                     ),
                 ),
             ),
-        )
-    if solver == "pymoo":
-        return PackOptions(
-            **common,
-            optimize_config=OptimizeConfig(compact_layout_backend="pymoo"),
             pymoo_config=PymooConfig(
                 algorithm="nsga2",
-                generations=60,
+                generations=80,
                 population_size=60,
                 offspring_count=None,
                 eliminate_duplicates=True,
@@ -95,10 +105,10 @@ def main() -> None:
 
     demo_cases = [
         ("first3_square", all_images[: min(3, len(all_images))], 1.0),
-        ("even3_landscape", _subset_every_other(all_images, 0)[: min(3, len(all_images))], 16 / 9),
-        ("random3_wide", random_subset, 2.0),
+        # ("even3_landscape", _subset_every_other(all_images, 0)[: min(3, len(all_images))], 16 / 9),
+        # ("random3_wide", random_subset, 2.0),
     ]
-    solver_order = ["optimize", "pymoo"]
+    solver_order = ["scipy-lbfgsb", "pymoo-nsga2"]
 
     logger.info("Found %d source images in %s", len(all_images), inputs_dir)
     for case_name, subset, aspect_ratio in demo_cases:

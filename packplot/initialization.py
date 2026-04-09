@@ -42,7 +42,7 @@ def make_initial_center_layouts(
     config: InitializationConfig,
     seed: int | None,
 ) -> list[np.ndarray]:
-    """Generate one or more initial center layouts for compact-layout solving."""
+    """Generate one or more initial center layouts for pack-phase solving."""
     if n_items <= 0:
         return [np.zeros((0, 2), dtype=float)]
     spacing = max(1e-3, float(config.grid_spacing))
