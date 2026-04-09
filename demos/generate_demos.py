@@ -6,12 +6,12 @@ import random
 import time
 from pathlib import Path
 
-from PIL import Image
 from packplot import (
     LbfgsbConfig,
     OptimizeConfig,
     OptimizationPhaseConfig,
     PackOptions,
+    PymooConfig,
     pack_images,
 )
 
@@ -22,23 +22,8 @@ def _subset_every_other(items: list[Path], start: int) -> list[Path]:
     return [item for idx, item in enumerate(items) if idx % 2 == start]
 
 
-def _pick_smallest_image(paths: list[Path]) -> list[Path]:
-    if not paths:
-        return []
-    best_path: Path | None = None
-    best_area = float("inf")
-    for path in paths:
-        with Image.open(path) as image:
-            area = float(image.width * image.height)
-        if area < best_area:
-            best_area = area
-            best_path = path
-    return [best_path] if best_path is not None else []
-
-
 def _options_for_solver(solver: str, aspect_ratio: float) -> PackOptions:
     common = dict(
-        solver=solver,
         target_aspect_ratio=aspect_ratio,
         white_threshold=250,
         padding=2,
@@ -48,6 +33,7 @@ def _options_for_solver(solver: str, aspect_ratio: float) -> PackOptions:
         return PackOptions(
             **common,
             optimize_config=OptimizeConfig(
+                compact_layout_backend="optimize",
                 compact_layout=OptimizationPhaseConfig(
                     method="lbfgsb",
                     progress_log_every_evaluations=2000,
@@ -69,14 +55,18 @@ def _options_for_solver(solver: str, aspect_ratio: float) -> PackOptions:
                 ),
             ),
         )
-    if solver == "heuristic":
+    if solver == "pymoo":
         return PackOptions(
             **common,
-            rotation_step_degrees=90,
-            allow_flip=False,
-            fill_ratio=0.25,
-            max_grow_steps=16,
-            grow_factor=1.2,
+            optimize_config=OptimizeConfig(compact_layout_backend="pymoo"),
+            pymoo_config=PymooConfig(
+                algorithm="nsga2",
+                generations=60,
+                population_size=60,
+                offspring_count=None,
+                eliminate_duplicates=True,
+                best_layout_count=3,
+            ),
         )
     raise ValueError(f"Unsupported solver '{solver}'")
 
@@ -108,7 +98,7 @@ def main() -> None:
         ("even3_landscape", _subset_every_other(all_images, 0)[: min(3, len(all_images))], 16 / 9),
         ("random3_wide", random_subset, 2.0),
     ]
-    solver_order = ["optimize", "heuristic"]
+    solver_order = ["optimize", "pymoo"]
 
     logger.info("Found %d source images in %s", len(all_images), inputs_dir)
     for case_name, subset, aspect_ratio in demo_cases:
@@ -118,28 +108,31 @@ def main() -> None:
         logger.info("Running case=%s with %d images (aspect=%.3f)", case_name, len(subset), aspect_ratio)
         for solver in solver_order:
             solver_subset = subset
-            # Heuristic is intentionally exhaustive and can be very slow on full-res sets.
-            # Keep it to the smallest image so each solver demo remains around the 60-second budget.
-            if solver == "heuristic":
-                solver_subset = _pick_smallest_image(subset)
             options = _options_for_solver(solver, aspect_ratio)
             t0 = time.perf_counter()
-            result = pack_images(solver_subset, options=options)
+            results = pack_images(solver_subset, options=options)
             elapsed = time.perf_counter() - t0
-            out_path = outputs_dir / f"{case_name}__{solver}.png"
-            result.image.save(out_path)
             status = "OK" if elapsed <= 60.0 else "SLOW"
-            logger.info(
-                "case=%s solver=%s runtime=%.1fs [%s] n=%d canvas=%s fill=%.3f -> %s",
-                case_name,
-                solver,
-                elapsed,
-                status,
-                len(solver_subset),
-                result.canvas_size,
-                result.fill_ratio,
-                out_path,
-            )
+            for result in results:
+                suffix = "" if len(results) == 1 else f"__best{result.rank}"
+                out_path = outputs_dir / f"{case_name}__{solver}{suffix}.png"
+                result.image.save(out_path)
+                logger.info(
+                    "case=%s solver=%s rank=%d runtime=%.1fs [%s] n=%d canvas=%s fill=%.3f "
+                    "sanity=%s overlap=%.6f oob=%d -> %s",
+                    case_name,
+                    solver,
+                    result.rank,
+                    elapsed,
+                    status,
+                    len(solver_subset),
+                    result.canvas_size,
+                    result.fill_ratio,
+                    result.sanity_passed,
+                    result.total_overlap_area,
+                    result.out_of_bounds_count,
+                    out_path,
+                )
 
 
 if __name__ == "__main__":

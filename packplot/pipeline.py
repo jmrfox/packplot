@@ -11,7 +11,7 @@ from packplot.problem import build_packing_problem
 from packplot.render import render_composition
 from packplot.solvers import get_solver
 from packplot.source_loaders import get_source_loader, infer_source_loader_name
-from packplot.types import PackOptions, PackedPlacement, PackResult, SolverMetadata
+from packplot.types import PackOptions, PackedPlacement, PackResult
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ def pack_images(
     arrangement_key_mode: ArrangementKeyMode = "stem",
     arrangement_key_func: ArrangementKeyFunc | None = None,
     strict_arrangement: bool = True,
-) -> PackResult:
+) -> list[PackResult]:
     """Pack input images into a single composed figure.
 
     Args:
@@ -72,8 +72,8 @@ def pack_images(
         strict_arrangement: If True, missing/extra keys raise errors.
 
     Returns:
-        `PackResult` containing the composed image, placement metadata, and
-        final canvas statistics.
+        List of `PackResult` objects ordered best-first. Solvers that produce
+        one layout return a single-element list.
     """
 
     paths = [Path(path) for path in image_paths]
@@ -97,7 +97,10 @@ def pack_images(
             )
             break
     arrangement_obj: Arrangement | None = None
-    solver_metadata: SolverMetadata | None = None
+    candidates: list[tuple[list[PackedPlacement], tuple[int, int], tuple[float, float, float] | None]] = []
+    solver_method: str = "unknown"
+    solver_iterations: int | None = None
+    solver_success: bool | None = None
     if arrangement is not None:
         arrangement_obj = load_arrangement(arrangement) if isinstance(arrangement, (str, Path)) else arrangement
         placements, canvas_size, background_color = apply_arrangement(
@@ -107,42 +110,49 @@ def pack_images(
             key_func=arrangement_key_func,
             strict=strict_arrangement,
         )
-        solver_metadata = SolverMetadata(method="arrangement_replay", iterations=0, success=True)
+        candidates = [(placements, canvas_size, None)]
+        solver_method = "arrangement_replay"
+        solver_iterations = 0
+        solver_success = True
     else:
         problem = build_packing_problem(source_objects, options)
-        solver = get_solver(options.solver)
-        placements, canvas_size, solver_metadata = solver.solve(problem)
-    total_overlap_area, out_of_bounds_count, sanity_passed, minimum_clearance, outside_violation_magnitude = (
-        _compute_layout_sanity(placements, canvas_size)
-    )
-    if not sanity_passed:
-        logger.warning(
-            "Layout sanity check failed: overlap_area=%.6f out_of_bounds_shapes=%d; rendering anyway. "
-            "Try increasing `edge_buffer`/`padding`, enabling clearance refinement, or increasing optimization iterations.",
-            total_overlap_area,
-            out_of_bounds_count,
+        compact_backend = options.resolved_optimize_config().compact_layout_backend
+        solver = get_solver(compact_backend)
+        candidates, solver_method, solver_iterations, solver_success = solver.solve(problem)
+
+    results: list[PackResult] = []
+    for rank, (placements, canvas_size, objective_values) in enumerate(candidates, start=1):
+        total_overlap_area, out_of_bounds_count, sanity_passed, minimum_clearance, outside_violation_magnitude = (
+            _compute_layout_sanity(placements, canvas_size)
         )
-    image = render_composition(canvas_size, placements, background_color=background_color)
-    fill_ratio = sum(item.polygon.area for item in placements) / float(canvas_size[0] * canvas_size[1])
-    logger.info(
-        "Packing complete: placements=%d canvas=%s fill_ratio=%.3f",
-        len(placements),
-        canvas_size,
-        fill_ratio,
-    )
-    return PackResult(
-        image=image,
-        placements=placements,
-        canvas_size=canvas_size,
-        target_aspect_ratio=options.target_aspect_ratio,
-        fill_ratio=fill_ratio,
-        background_color=background_color,
-        total_overlap_area=total_overlap_area,
-        out_of_bounds_count=out_of_bounds_count,
-        sanity_passed=sanity_passed,
-        minimum_clearance=minimum_clearance,
-        outside_violation_magnitude=outside_violation_magnitude,
-        solver_method=solver_metadata.method if solver_metadata is not None else None,
-        solver_iterations=solver_metadata.iterations if solver_metadata is not None else None,
-        solver_success=solver_metadata.success if solver_metadata is not None else None,
-    )
+        if not sanity_passed:
+            logger.warning(
+                "Layout sanity check failed: overlap_area=%.6f out_of_bounds_shapes=%d; rendering anyway. "
+                "Try increasing `edge_buffer`/`padding`, enabling clearance refinement, or increasing optimization iterations.",
+                total_overlap_area,
+                out_of_bounds_count,
+            )
+        image = render_composition(canvas_size, placements, background_color=background_color)
+        fill_ratio = sum(item.polygon.area for item in placements) / float(canvas_size[0] * canvas_size[1])
+        results.append(
+            PackResult(
+                image=image,
+                placements=placements,
+                canvas_size=canvas_size,
+                target_aspect_ratio=options.target_aspect_ratio,
+                fill_ratio=fill_ratio,
+                background_color=background_color,
+                total_overlap_area=total_overlap_area,
+                out_of_bounds_count=out_of_bounds_count,
+                sanity_passed=sanity_passed,
+                minimum_clearance=minimum_clearance,
+                outside_violation_magnitude=outside_violation_magnitude,
+                solver_method=solver_method,
+                solver_iterations=solver_iterations,
+                solver_success=solver_success,
+                objective_values=objective_values,
+                rank=rank,
+            )
+        )
+    logger.info("Packing complete: returned %d solution(s).", len(results))
+    return results

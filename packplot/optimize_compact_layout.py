@@ -8,7 +8,8 @@ from scipy.optimize import OptimizeResult, minimize
 from shapely import affinity
 from shapely.geometry import Polygon
 
-from packplot.optimize_objectives import bbox_metrics, buffered_with_radius, total_overlap
+from packplot.initialization import make_initial_center_layouts
+from packplot.optimize_objectives import bbox_metrics, buffered_with_radius, min_pair_clearance, total_overlap
 from packplot.problem import PackingProblem
 from packplot.types import OptimizeConfig, PackOptions, SourceObject
 
@@ -22,9 +23,17 @@ class CompactLayoutEval:
     score: float
 
 
+@dataclass(frozen=True)
+class CompactLayoutMetrics:
+    area: float
+    aspect_error: float
+    overlap: float
+    min_pair_clearance: float
+
+
 @dataclass
 class CompactLayoutSolveResult:
-    result: OptimizeResult
+    candidates: list[CompactLayoutEval]
     norm_scale: float
 
 
@@ -89,6 +98,46 @@ def pick_best_compact_layout(candidates: list[CompactLayoutEval]) -> CompactLayo
     )
 
 
+def rank_compact_layout_candidates(candidates: list[CompactLayoutEval]) -> list[CompactLayoutEval]:
+    return sorted(
+        candidates,
+        key=lambda item: (
+            item.overlap > 1e-6,
+            item.overlap,
+            item.aspect_error,
+            item.area,
+            item.score,
+        ),
+    )
+
+
+def evaluate_compact_layout_vector(
+    vec: np.ndarray,
+    *,
+    normalized_polygons: list[Polygon],
+    target_aspect_ratio: float,
+    jacobi_inflation: float,
+    normalized_buffer: float,
+) -> CompactLayoutMetrics:
+    n = len(normalized_polygons)
+    jacobi_size = 2 * max(0, n - 1)
+    jacobi_raw = vec[:jacobi_size].reshape((n - 1, 2)) if n > 1 else np.zeros((0, 2), dtype=float)
+    rotations = vec[jacobi_size:]
+    centers = centers_from_jacobi(jacobi_raw, jacobi_inflation)
+    polygons: list[Polygon] = []
+    for idx, polygon in enumerate(normalized_polygons):
+        angle = float(rotations[idx] % 1.0) * 360.0
+        polygons.append(rotate_polygon_to_center(polygon, angle, centers[idx]))
+    buffered_polygons = buffered_with_radius(polygons, normalized_buffer)
+    width, height, area = bbox_metrics(buffered_polygons)
+    return CompactLayoutMetrics(
+        area=float(area),
+        aspect_error=float(abs((width / height) - target_aspect_ratio)),
+        overlap=float(total_overlap(buffered_polygons)),
+        min_pair_clearance=float(min_pair_clearance(buffered_polygons)),
+    )
+
+
 def run_compact_layout(
     *,
     source_objects: list[SourceObject],
@@ -107,8 +156,13 @@ def run_compact_layout(
     normalized_polygons = problem.normalized_hulls
     norm_scale = problem.normalization_scale
 
-    init_centers = make_initial_centers(source_objects, scale=1.25)
-    init_jacobi = jacobi_from_centers(init_centers)
+    init_center_layouts = make_initial_center_layouts(
+        n_items=n,
+        target_aspect_ratio=options.target_aspect_ratio,
+        config=options.initialization_config,
+        seed=options.random_seed,
+    )
+    init_jacobi = jacobi_from_centers(init_center_layouts[0])
     normalized_buffer = max(0.0, float(options.padding) + float(options.edge_buffer)) / norm_scale
     x0 = np.concatenate([init_jacobi.reshape(-1), np.zeros(n, dtype=float)])
     bounds = [(-5.0, 5.0)] * (2 * (n - 1)) + [(0.0, 1.0)] * n
@@ -131,42 +185,40 @@ def run_compact_layout(
         rotations = vec[jacobi_size:]
         return jacobi_raw, rotations
 
-    def compact_layout_geometry(vec: np.ndarray) -> tuple[list[Polygon], float, float, float]:
-        jacobi_raw, rotations = unpack(vec)
-        centers = centers_from_jacobi(jacobi_raw, options.jacobi_inflation)
-        polygons: list[Polygon] = []
-        for idx, polygon in enumerate(normalized_polygons):
-            angle = float(rotations[idx] % 1.0) * 360.0
-            polygons.append(rotate_polygon_to_center(polygon, angle, centers[idx]))
-
-        buffered = buffered_with_radius(polygons, normalized_buffer)
-        width, height, area = bbox_metrics(buffered)
-        aspect_error = abs((width / height) - options.target_aspect_ratio)
-        overlap = total_overlap(buffered)
-        return buffered, overlap, aspect_error, area
-
     def objective(vec: np.ndarray) -> float:
         jacobi_raw, _ = unpack(vec)
-        _, overlap, aspect_error, area = compact_layout_geometry(vec)
-        aspect_penalty = aspect_error**2
+        metrics = evaluate_compact_layout_vector(
+            vec,
+            normalized_polygons=normalized_polygons,
+            target_aspect_ratio=options.target_aspect_ratio,
+            jacobi_inflation=options.jacobi_inflation,
+            normalized_buffer=normalized_buffer,
+        )
+        aspect_penalty = metrics.aspect_error**2
         regularization = float(np.sum(jacobi_raw**2))
 
         score = float(
-            area
-            + compact_layout_obj_cfg.overlap_penalty_weight * overlap
+            metrics.area
+            + compact_layout_obj_cfg.overlap_penalty_weight * metrics.overlap
             + compact_layout_obj_cfg.aspect_ratio_penalty_weight * aspect_penalty
             + compact_layout_obj_cfg.jacobi_regularization_weight * regularization
         )
-        compact_layout_progress.update(score=score, overlap=overlap, aspect_error=aspect_error)
+        compact_layout_progress.update(score=score, overlap=metrics.overlap, aspect_error=metrics.aspect_error)
         return score
 
     def eval_result(result: OptimizeResult) -> CompactLayoutEval:
-        _, overlap, aspect_error, area = compact_layout_geometry(result.x)
+        metrics = evaluate_compact_layout_vector(
+            result.x,
+            normalized_polygons=normalized_polygons,
+            target_aspect_ratio=options.target_aspect_ratio,
+            jacobi_inflation=options.jacobi_inflation,
+            normalized_buffer=normalized_buffer,
+        )
         return CompactLayoutEval(
             result=result,
-            overlap=float(overlap),
-            aspect_error=float(aspect_error),
-            area=float(area),
+            overlap=metrics.overlap,
+            aspect_error=metrics.aspect_error,
+            area=metrics.area,
             score=float(result.fun),
         )
 
@@ -174,13 +226,16 @@ def run_compact_layout(
     candidates: list[CompactLayoutEval] = []
     if method in {"lbfgsb", "hybrid"}:
         rng = np.random.default_rng(options.random_seed if options.random_seed is not None else None)
-        starts = [x0]
+        starts = [np.concatenate([jacobi_from_centers(layout).reshape(-1), np.zeros(n, dtype=float)]) for layout in init_center_layouts]
+        if not starts:
+            starts = [x0]
         for _ in range(max(0, compact_layout_lbfgsb.random_restart_count - 1)):
-            jitter = np.zeros_like(x0)
+            base = starts[rng.integers(0, len(starts))]
+            jitter = np.zeros_like(base)
             if jacobi_size > 0:
                 jitter[:jacobi_size] = rng.uniform(-0.9, 0.9, size=jacobi_size)
             jitter[jacobi_size:] = rng.uniform(-0.25, 0.25, size=n)
-            starts.append(np.clip(x0 + jitter, [-5.0] * jacobi_size + [0.0] * n, [5.0] * jacobi_size + [1.0] * n))
+            starts.append(np.clip(base + jitter, [-5.0] * jacobi_size + [0.0] * n, [5.0] * jacobi_size + [1.0] * n))
 
         phase_iter = max(
             20,
@@ -292,7 +347,8 @@ def run_compact_layout(
         )
         candidates.append(eval_result(de_res))
 
-    best = pick_best_compact_layout(candidates)
+    ranked = rank_compact_layout_candidates(candidates)
+    best = ranked[0]
     result = best.result
     logger.info(
         "Compact-layout selected candidate: overlap=%.6f aspect_error=%.4f area=%.3f score=%.3f",
@@ -305,4 +361,4 @@ def run_compact_layout(
         logger.warning("Optimizer did not fully converge: %s", result.message)
     else:
         logger.info("Optimizer converged in %d iterations.", result.nit)
-    return CompactLayoutSolveResult(result=result, norm_scale=norm_scale)
+    return CompactLayoutSolveResult(candidates=ranked, norm_scale=norm_scale)

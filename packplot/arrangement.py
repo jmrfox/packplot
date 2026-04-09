@@ -63,12 +63,16 @@ def _raise_on_duplicate_keys(keys: list[str], *, context: str) -> None:
 
 
 def create_arrangement(
-    result: PackResult,
+    result: PackResult | list[PackResult],
     *,
     key_mode: ArrangementKeyMode = "stem",
     key_func: ArrangementKeyFunc | None = None,
 ) -> Arrangement:
     """Create a reusable arrangement from a prior `pack_images` result."""
+    if isinstance(result, list):
+        if not result:
+            raise ValueError("Cannot create arrangement from an empty results list.")
+        result = result[0]
     width, height = result.canvas_size
     entries: list[ArrangementEntry] = []
     keys: list[str] = []

@@ -37,6 +37,22 @@ def test_raster_source_loader_loads_jpeg(tmp_path: Path) -> None:
     assert loaded[0].hull.area > 0
 
 
+def test_raster_source_loader_loads_bmp_and_gif(tmp_path: Path) -> None:
+    bmp_path = tmp_path / "shape.bmp"
+    gif_path = tmp_path / "shape.gif"
+    image = Image.new("RGB", (32, 32), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((7, 7, 24, 24), fill=(20, 20, 20))
+    image.save(bmp_path, format="BMP")
+    image.save(gif_path, format="GIF")
+
+    loader = get_source_loader("raster")
+    loaded = loader.load([bmp_path, gif_path], PackOptions())
+    assert len(loaded) == 2
+    assert loaded[0].hull.area > 0
+    assert loaded[1].hull.area > 0
+
+
 def test_infer_source_loader_name_handles_svg_and_mixed(tmp_path: Path) -> None:
     png = tmp_path / "a.png"
     svg = tmp_path / "b.svg"
@@ -68,7 +84,7 @@ def test_svg_source_loader_path_exists(tmp_path: Path) -> None:
 
 
 def test_validate_source_inputs_rejects_unsupported_extension(tmp_path: Path) -> None:
-    bad = tmp_path / "bad.bmp"
+    bad = tmp_path / "bad.txt"
     bad.write_text("not-an-image", encoding="utf-8")
     with pytest.raises(ValueError, match="Unsupported source format"):
         validate_source_inputs([bad])

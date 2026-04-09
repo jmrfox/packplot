@@ -38,6 +38,16 @@ def total_overlap(polygons: list[Polygon]) -> float:
     return overlap
 
 
+def min_pair_clearance(polygons: list[Polygon]) -> float:
+    if len(polygons) <= 1:
+        return 0.0
+    best = float("inf")
+    for i, left in enumerate(polygons):
+        for right in polygons[i + 1 :]:
+            best = min(best, float(left.distance(right)))
+    return float(best)
+
+
 def clearance_values(polygons: list[Polygon], width: int, height: int) -> np.ndarray:
     values: list[float] = []
     for polygon in polygons:

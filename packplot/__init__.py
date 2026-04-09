@@ -1,6 +1,7 @@
 """Public package API for packplot."""
 
 from packplot.arrangement import Arrangement, ArrangementKeyFunc, create_arrangement, load_arrangement, save_arrangement
+from packplot.output_backends import list_output_backends, render_result_with_backend
 from packplot.pipeline import pack_images
 from packplot.problem import PackingProblem, build_packing_problem
 from packplot.solvers import LayoutSolver, get_solver
@@ -16,13 +17,14 @@ from packplot.types import (
     ClearanceRefinementObjectiveConfig,
     CompactLayoutObjectiveConfig,
     DifferentialEvolutionConfig,
+    InitializationConfig,
     LbfgsbConfig,
     OptimizeConfig,
     OptimizationPhaseConfig,
     PackOptions,
     PackResult,
     PackedPlacement,
-    SolverMetadata,
+    PymooConfig,
     SourceObject,
 )
 
@@ -33,6 +35,8 @@ __all__ = [
     "save_arrangement",
     "load_arrangement",
     "pack_images",
+    "list_output_backends",
+    "render_result_with_backend",
     "PackingProblem",
     "build_packing_problem",
     "LayoutSolver",
@@ -44,14 +48,15 @@ __all__ = [
     "get_source_loader",
     "infer_source_loader_name",
     "PackOptions",
+    "InitializationConfig",
     "OptimizeConfig",
     "OptimizationPhaseConfig",
+    "PymooConfig",
     "LbfgsbConfig",
     "DifferentialEvolutionConfig",
     "CompactLayoutObjectiveConfig",
     "ClearanceRefinementObjectiveConfig",
     "PackResult",
     "PackedPlacement",
-    "SolverMetadata",
     "SourceObject",
 ]

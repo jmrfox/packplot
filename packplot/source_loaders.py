@@ -9,7 +9,16 @@ from PIL import Image
 from packplot.extract import extract_source_object_from_image, extract_source_objects
 from packplot.types import PackOptions, SourceObject
 
-RASTER_SUFFIXES = {".png", ".jpg", ".jpeg"}
+RASTER_SUFFIXES = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".bmp",
+    ".gif",
+    ".tif",
+    ".tiff",
+    ".webp",
+}
 SVG_SUFFIX = ".svg"
 
 
@@ -22,7 +31,7 @@ class SourceLoader(ABC):
 
 
 class RasterSourceLoader(SourceLoader):
-    """Default PNG/JPEG raster loader using existing extraction pipeline."""
+    """Default raster loader using the existing extraction pipeline."""
 
     def load(self, paths: list[Path], options: PackOptions) -> list[SourceObject]:
         return extract_source_objects(paths, options)
@@ -35,7 +44,7 @@ class SvgSourceLoader(SourceLoader):
         if not paths:
             raise ValueError("At least one image path is required.")
         try:
-            import cairosvg
+            import cairosvg  # pylint: disable=import-error
         except Exception as exc:
             raise RuntimeError(
                 "SVG loading requires 'cairosvg'. Install it to enable SVG inputs."

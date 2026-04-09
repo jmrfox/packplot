@@ -43,3 +43,33 @@ This list is intentionally ordered. Complete items top-to-bottom.
 - [x] Add dedicated tests for sanity-check warning behavior.
 - [x] Add tests for render edge cases (empty placements, ordering/layering, background handling).
 - [x] Add tests for non-PNG source paths and future SVG parsing behavior.
+
+## 6) P0/P1 align to two-phase optimizer pipeline
+
+- [x] Remove legacy search-based solver naming/path; use optimizer-based solver naming consistently.
+- [x] Enforce one shared high-level flow for all methods:
+  - load sources,
+  - build normalized `PackingProblem`,
+  - solve `compact_layout`,
+  - solve `clearance_refinement`,
+  - render.
+- [x] Introduce a phase-optimizer interface so each phase can choose optimizer independently (`lbfgsb`, `de`, `nsga2`).
+- [x] Refactor compact-layout solving to be backend-agnostic:
+  - one objective definition,
+  - one variable mapping (Jacobi + rotations),
+  - multiple optimizer backends.
+- [x] Refactor clearance-refinement solving to be backend-agnostic:
+  - one objective definition (fixed-canvas spacing),
+  - one variable mapping (normalized centers),
+  - multiple optimizer backends.
+- [x] Make both phases return ranked solution lists; pass top candidates from phase 1 into phase 2 (beam-style continuation).
+- [x] Standardize ranking/selection across backends:
+  - feasibility first (overlap/outside),
+  - compactness and aspect for compact-layout,
+  - spacing quality for clearance-refinement.
+- [x] Unify solver outputs as `list[PackResult]` best-first for every method (single-element list when backend is single-solution).
+- [x] Expand config to choose optimizer per phase explicitly in `PackOptions` (no solver-specific hidden defaults).
+- [x] Add integration tests that run at least one case for each optimizer choice in both phases and verify:
+  - non-empty solution list,
+  - sanity metrics present,
+  - deterministic ranking under fixed seed.

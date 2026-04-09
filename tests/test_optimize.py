@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from PIL import Image, ImageDraw
 
 from packplot import pack_images
-from conftest import fast_opt_options
+from tests.helpers import fast_opt_options
 
 
 def _make_shape(path: Path, shape: str) -> None:
@@ -26,7 +27,7 @@ def test_optimizer_solver_produces_layout(tmp_path: Path) -> None:
     _make_shape(paths[1], "tri")
     _make_shape(paths[2], "ellipse")
 
-    result = pack_images(
+    results = pack_images(
         paths,
         options=fast_opt_options(
             target_aspect_ratio=1.6,
@@ -35,9 +36,26 @@ def test_optimizer_solver_produces_layout(tmp_path: Path) -> None:
             jacobi_inflation=1.1,
         ),
     )
+    result = results[0]
 
     assert len(result.placements) == 3
     assert result.canvas_size[0] > 0
     assert result.canvas_size[1] > 0
     ratio = result.canvas_size[0] / result.canvas_size[1]
     assert ratio > 1.0
+
+
+def test_compact_layout_nsga2_method_runs(tmp_path: Path) -> None:
+    paths = [tmp_path / "n1.png", tmp_path / "n2.png", tmp_path / "n3.png"]
+    _make_shape(paths[0], "rect")
+    _make_shape(paths[1], "tri")
+    _make_shape(paths[2], "ellipse")
+    base = fast_opt_options(target_aspect_ratio=1.2, padding=2)
+    nsga2_cfg = replace(
+        base.optimize_config,
+        compact_layout=replace(base.optimize_config.compact_layout, method="nsga2"),
+        enable_clearance_refinement_phase=False,
+    )
+    results = pack_images(paths, options=replace(base, optimize_config=nsga2_cfg))
+    assert len(results) >= 1
+    assert results[0].canvas_size[0] > 0

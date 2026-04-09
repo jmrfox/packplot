@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw
 
 from packplot.arrangement import Arrangement, ArrangementEntry
 from packplot import pack_images
-from conftest import fast_opt_options
+from tests.helpers import fast_opt_options
 
 
 def _make_object(path: Path, shape: str) -> None:
@@ -32,10 +32,11 @@ def test_pipeline_packs_images_end_to_end(tmp_path: Path) -> None:
     _make_object(image_paths[1], "diamond")
     _make_object(image_paths[2], "rect")
 
-    result = pack_images(
+    results = pack_images(
         image_paths,
         options=fast_opt_options(target_aspect_ratio=1.3, padding=2),
     )
+    result = results[0]
 
     assert result.image.mode == "RGBA"
     assert result.image.size == result.canvas_size
@@ -66,12 +67,13 @@ def test_pipeline_logs_sanity_warning_when_arrangement_overlaps(tmp_path: Path, 
         ],
     )
     caplog.set_level(logging.WARNING)
-    result = pack_images(
+    results = pack_images(
         image_paths,
         arrangement=arrangement,
         arrangement_key_mode="stem",
         strict_arrangement=True,
     )
+    result = results[0]
     assert not result.sanity_passed
     assert result.total_overlap_area > 0
     assert any("Layout sanity check failed" in rec.message for rec in caplog.records)

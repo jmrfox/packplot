@@ -32,7 +32,7 @@ class DifferentialEvolutionConfig:
 class OptimizationPhaseConfig:
     """Optimizer settings for one optimization stage."""
 
-    method: str = "lbfgsb"  # "lbfgsb", "de", "hybrid"
+    method: str = "lbfgsb"  # "lbfgsb", "de", "hybrid", "nsga2"
     progress_log_every_evaluations: int = 500
     progress_log_heartbeat_seconds: float = 5.0
     lbfgsb: LbfgsbConfig = field(default_factory=LbfgsbConfig)
@@ -64,7 +64,10 @@ class ClearanceRefinementObjectiveConfig:
 class OptimizeConfig:
     """Complete optimization configuration grouped by phase and objective."""
 
+    compact_layout_backend: str = "optimize"  # "optimize" or "pymoo"
     compact_layout: OptimizationPhaseConfig = field(default_factory=OptimizationPhaseConfig)
+    compact_layout_best_count: int = 1
+    compact_to_clearance_beam_width: int = 1
     enable_clearance_refinement_phase: bool = True
     clearance_refinement: OptimizationPhaseConfig = field(default_factory=OptimizationPhaseConfig)
     compact_layout_objective: CompactLayoutObjectiveConfig = field(default_factory=CompactLayoutObjectiveConfig)
@@ -74,22 +77,45 @@ class OptimizeConfig:
 
 
 @dataclass(frozen=True)
+class PymooConfig:
+    """Configuration for the multi-objective pymoo solver."""
+
+    algorithm: str = "nsga2"
+    generations: int = 60
+    population_size: int = 48
+    offspring_count: int | None = None
+    eliminate_duplicates: bool = True
+    best_layout_count: int = 1
+    verbose: bool = True
+
+
+@dataclass(frozen=True)
+class InitializationConfig:
+    """Configuration for compact-layout initialization before optimization."""
+
+    method: str = "grid"  # "grid" or "randomized_grid"
+    grid_spacing: float = 1.25
+    randomized_layout_count: int = 8
+
+
+@dataclass(frozen=True)
 class PackOptions:
     """User-facing options for extraction, packing, and optimization behavior."""
 
-    solver: str = "optimize"
     target_aspect_ratio: float = 1.0
     padding: int = 2
     edge_buffer: float = 1.0
     jacobi_inflation: float = 1.1
-    allow_flip: bool = True
+    allow_flip: bool = False
     rotation_step_degrees: int = 15
     white_threshold: int = 245
     alpha_threshold: int = 1
     fill_ratio: float = 0.72
     max_grow_steps: int = 12
     grow_factor: float = 1.15
+    initialization_config: InitializationConfig = field(default_factory=InitializationConfig)
     optimize_config: OptimizeConfig = field(default_factory=OptimizeConfig)
+    pymoo_config: PymooConfig = field(default_factory=PymooConfig)
     random_seed: int | None = 0
 
     def resolved_optimize_config(self) -> OptimizeConfig:
@@ -120,15 +146,6 @@ class PackedPlacement:
     image: Image.Image
 
 
-@dataclass(frozen=True)
-class SolverMetadata:
-    """Optional metadata describing solver execution quality."""
-
-    method: str
-    iterations: int | None = None
-    success: bool | None = None
-
-
 @dataclass
 class PackResult:
     """Result returned by `pack_images`, including image and placement metadata."""
@@ -147,5 +164,7 @@ class PackResult:
     solver_method: str | None = None
     solver_iterations: int | None = None
     solver_success: bool | None = None
+    objective_values: tuple[float, float, float] | None = None
+    rank: int = 1
 
 
