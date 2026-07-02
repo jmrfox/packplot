@@ -1,0 +1,72 @@
+---
+description: General Python standards for scientific code (uv, pytest, simplicity)
+globs: **/*.py
+alwaysApply: false
+---
+
+# Python Standards (Scientific)
+
+Prefer **simple, direct code** over abstraction. Write for clarity, correctness, and maintainability.
+
+## Tooling
+
+- **uv** for all package and script management (`uv add`, `uv sync`, `uv run pytest`)
+- **pytest** for tests; run with `uv run pytest`
+- Target **Python 3.12+**; start every module with `from __future__ import annotations`
+
+## Simplicity First
+
+- Write the simplest code that solves the problem correctly
+- Prefer plain functions and module-level helpers over classes when there is no state to encapsulate
+- Use **frozen `@dataclass`** for config, results, and immutable data containers
+- Use classes when they genuinely group state and behavior; avoid classes that exist only to namespace functions
+- Do **not** add pass-through wrappers, one-line aliases, or "ghost" functions that only delegate without adding logic
+- Do **not** introduce abstract base classes, factory hierarchies, or indirection layers unless the problem genuinely requires them
+- Extract a helper only when it removes real duplication or clarifies a non-obvious step
+
+```python
+# ❌ BAD — useless wrapper
+def compute_mean(values: np.ndarray) -> float:
+    return float(np.mean(values))
+
+# ✅ GOOD — call the API directly, or extract only when logic is shared
+mean = float(np.mean(values))
+```
+
+## Modern Python
+
+- Type-annotate public functions and dataclass fields; use `X | Y` unions, not `Optional`
+- Use `pathlib.Path` for file paths, not raw strings
+- Use `logging.getLogger(__name__)` for diagnostics; avoid `print` in library code
+- Put heavy imports behind `TYPE_CHECKING` when they are only needed for annotations
+- Prefix module-private helpers with `_`; keep the public surface small and intentional
+
+## Scientific Code
+
+- Prefer **NumPy vectorization** and established library primitives (SciPy, pandas, etc.) over manual Python loops on large arrays
+- Keep numeric code readable: name intermediate quantities when it aids understanding
+- Reuse existing modules in the codebase rather than reimplementing the same logic
+
+## Documentation
+
+- Add a **docstring** to every public function, method, and dataclass that is part of the API
+- Docstrings should state purpose and non-obvious behavior; one line is fine for simple functions
+- Add a **brief inline comment** only where the *why* is not obvious from the code (algorithm choice, units, coordinate convention, numerical tolerance)
+
+```python
+# ✅ GOOD — comment explains non-obvious intent
+# Median is robust to outliers in noisy measurements.
+baseline = float(np.median(samples))
+```
+
+## Tests
+
+- Place tests in a `tests/` directory, mirroring the package layout where practical
+- Name tests `test_<behavior>`; use `tmp_path`, parametrization, and small synthetic fixtures
+- Test real behavior and edge cases, not implementation trivia or trivial getters
+
+## Module Layout
+
+- One concern per file; keep shared types and config in a dedicated module to avoid circular imports
+- Separate orchestration/pipeline logic from low-level primitives when complexity warrants it
+- Expose a small, intentional public API; keep implementation details private

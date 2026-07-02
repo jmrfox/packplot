@@ -1,0 +1,68 @@
+---
+description: Windows 11 / PowerShell environment — paths, shell syntax, and command conventions
+alwaysApply: true
+---
+
+# Windows 11 Environment
+
+This project runs on **Windows 11** with **PowerShell** as the default shell. Use Windows-native syntax for all terminal commands and paths.
+
+## Paths
+
+- Prefer **absolute Windows paths**: `C:\Users\MainUser\Documents\Repos\packplot\...`
+- Use backslashes in paths, or forward slashes when quoting is simpler — both work in PowerShell
+- Do **not** assume Unix paths (`/home/...`, `/tmp/...`); use `$env:TEMP` or `Join-Path` for temp dirs
+
+## Shell Syntax
+
+- Write commands for **PowerShell**, not bash/sh
+- Chain with `;` or separate `Shell` invocations — do **not** rely on bash-only `&&`, `||`, or `export`
+- Environment variables: `$env:NAME` (e.g. `$env:PATH`), not `$NAME` or `export NAME=...`
+- Process substitution, bash heredocs (`<<'EOF'`), and `$(cat <<'EOF' ...)` **do not work** in PowerShell
+
+```powershell
+# ❌ BAD — bash syntax
+export FOO=bar && cd /tmp && ls -la
+
+# ✅ GOOD — PowerShell
+$env:FOO = "bar"; Set-Location $env:TEMP; Get-ChildItem
+```
+
+## Common Command Mappings
+
+| Avoid (Unix) | Use (Windows / PowerShell) |
+|---|---|
+| `which cmd` | `Get-Command cmd` or `where.exe cmd` |
+| `rm -rf dir` | `Remove-Item -Recurse -Force dir` |
+| `cp -r src dst` | `Copy-Item -Recurse src dst` |
+| `mv a b` | `Move-Item a b` |
+| `cat file` | `Get-Content file` |
+| `touch file` | `New-Item -ItemType File file` |
+| `grep pattern file` | `Select-String pattern file` |
+| `find . -name "*.py"` | `Get-ChildItem -Recurse -Filter *.py` |
+| `/dev/null` | `$null` |
+| `sleep 5` | `Start-Sleep -Seconds 5` |
+
+## Git & Multi-line Strings
+
+For commit messages or PR bodies, use PowerShell here-strings instead of bash heredocs:
+
+```powershell
+git commit -m @"
+Short summary line.
+
+Optional body paragraph.
+"@
+```
+
+## Python & Tooling
+
+- Run project scripts via **uv**: `uv run pytest`, `uv run python script.py`
+- Activate venv only when needed: `.\.venv\Scripts\Activate.ps1`
+- Line endings may be **CRLF**; do not assume LF-only tooling behavior
+
+## Assumptions to Avoid
+
+- No `sudo`, `apt`, `brew`, `chmod`, or `ln -s`
+- Filesystem is **case-insensitive** by default — watch for case-only renames
+- Prefer **native Windows builds** of tools; if a command fails, retry with PowerShell equivalents before assuming WSL

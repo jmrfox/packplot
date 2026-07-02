@@ -5,56 +5,13 @@ build-backend = "hatchling.build"
 [project]
 name = "packplot"
 version = "0.1.0"
-description = "Pack arbitrary 2D object images into rectangular figures."
+description = "Pack rectangular images into an optimal composite"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "numpy>=2.4.4",
     "pillow>=12.2.0",
-    "pymoo>=0.6.1.6",
-    "scipy>=1.17.1",
     "shapely>=2.1.2",
-]
-
-[project.optional-dependencies]
-svg = [
-    "cairosvg>=2.8.2",
-]
-matplotlib = [
-    "matplotlib>=3.10.8",
-]
-seaborn = [
-    "matplotlib>=3.10.8",
-    "seaborn>=0.13.2",
-]
-plotly = [
-    "plotly>=6.6.0",
-]
-bokeh = [
-    "bokeh>=3.9.0",
-]
-pyvista = [
-    "pyvista>=0.47.2",
-]
-pygal = [
-    "pygal>=3.1.0",
-]
-outputs = [
-    "bokeh>=3.9.0",
-    "matplotlib>=3.10.8",
-    "plotly>=6.6.0",
-    "pygal>=3.1.0",
-    "pyvista>=0.47.2",
-    "seaborn>=0.13.2",
-]
-all = [
-    "bokeh>=3.9.0",
-    "cairosvg>=2.8.2",
-    "matplotlib>=3.10.8",
-    "plotly>=6.6.0",
-    "pygal>=3.1.0",
-    "pyvista>=0.47.2",
-    "seaborn>=0.13.2",
 ]
 
 [dependency-groups]
